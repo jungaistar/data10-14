@@ -6,7 +6,7 @@
   var L = window.STLogic, S = window.STStore, C = window.STCharts, AIP = window.AIPanel, SMP = window.STSample;
   /* 판 맞추기 — 브라우저가 옛 logic.js 와 새 app.js 를 섞어 쓰면(Pages 캐시) 버튼과 결과가 어긋날 수 있어, 섞였으면 계산하지 않고 새로고침을 안내합니다.
      판은 scripts/bump-version.mjs 로 index.html(?v=) · logic.js 와 함께 올립니다. */
-  var APP_VERSION = '2026-10-28.1';
+  var APP_VERSION = '2026-11-08.1';
   if (!L || L.VERSION !== APP_VERSION) {
     var m0 = document.getElementById('main') || document.body;
     m0.innerHTML = '<section class="card" id="versionMismatch"><h1>새 판이 나왔습니다 — 새로고침(Ctrl+F5)해 주세요</h1><p class="alert warn">이 브라우저가 옛 파일과 새 파일을 섞어 불러왔습니다(js/logic.js ' +
@@ -17,7 +17,8 @@
   (function () { var ft = document.querySelector('.site-footer .inner') || document.querySelector('.site-footer'); if (!ft) return; var s = document.createElement('span'); s.className = 'ver'; s.textContent = ' · 판 ' + APP_VERSION; ft.appendChild(s); })();
   var db = S.loadDb();
   var me = S.loadMe();
-  var ui = { pending: null, errors: [], fieldScope: '', fieldFilter: 'todo', q: '', open: '', varWh: '', varState: 'diff', varQ: '', dim: 'wh', photo: null, withPhoto: false };
+  var BI_TOP = 8; // 분석(BI) 그래프에 처음 그릴 행 수(절대 차이 상위)
+  var ui = { biPick: {}, pending: null, errors: [], fieldScope: '', fieldFilter: 'todo', q: '', open: '', varWh: '', varState: 'diff', varQ: '', dim: 'wh', photo: null, withPhoto: false };
   var main = document.getElementById('main');
 
   /* ── 작은 도구 ───────────────────────────── */
@@ -96,11 +97,36 @@
   function hasSession() { return !!(db.session && db.items.length); }
   function emptyNotice() {
     return h('section', { class: 'card empty' },
-      h('p', null, '아직 실사 회차가 없습니다.'),
-      h('p', null, 'ERP 재고 엑셀로 작업지시를 만들거나(사무실), 받은 작업지시서 엑셀을 넣어 주세요(휴대폰). 가상 샘플로 먼저 둘러봐도 됩니다.'),
+      h('p', null, '아직 이 기기에 실사 회차가 없습니다.'),
+      h('p', null, '사무실에서는 ERP 재고 엑셀로 작업지시를 만들고, 현장(휴대폰)에서는 사무실에서 받은 기록서 엑셀을 넣으면 같은 작업지시가 이 기기에 생깁니다. 가상 샘플로 먼저 둘러봐도 됩니다.'),
       h('div', { class: 'btn-row', style: 'justify-content:center' },
-        h('a', { class: 'btn btn-primary', href: '#/order' }, '① 작업지시로'),
-        h('button', { type: 'button', class: 'btn', onclick: loadSample }, '가상 샘플로 시작')));
+        orderBookButton('btn btn-primary', '받은 기록서 엑셀 넣기(현장)'),
+        h('a', { class: 'btn', href: '#/order' }, '① 작업지시 만들기(사무실)'),
+        h('button', { type: 'button', class: 'btn', onclick: loadSample }, '가상 샘플로 시작')),
+      teamSteps());
+  }
+  /* 현장: 사무실에서 받은 「재고실사 기록서 엑셀」(지시정보 시트가 있는 파일)만 받습니다 */
+  function orderBookButton(cls, text) {
+    var f = h('input', { type: 'file', accept: '.xlsx,.xls,.xlsm' });
+    f.addEventListener('change', function () {
+      var file = f.files[0]; f.value = ''; if (!file) return;
+      readBook(file).then(function (sheets) {
+        if (sheets.some(function (x) { return x.name === '지시정보'; })) loadOrderBook(sheets, file.name);
+        else toast(file.name + ': 작업지시(기록서) 엑셀이 아닙니다 — 사무실에서 ① 작업지시 「기록서 엑셀」로 받은 파일을 넣어 주세요. ERP 원본 엑셀은 ① 작업지시에서 올립니다.', true);
+      }, function (e) { toast(e.message, true); });
+    });
+    return h('label', { class: cls }, f, text);
+  }
+  /* 여러 사람이 함께 쓰는 순서 — 1단계는 서버(DB)가 없어 기기끼리 파일로 주고받습니다 (11-08 수강생 질문) */
+  function teamSteps() {
+    return h('details', { class: 'team-steps' }, h('summary', null, '여러 사람이 각자 휴대폰으로 입력하는 순서'),
+      h('ol', { class: 'steps' },
+        h('li', null, '사무실(1명): ① 작업지시에서 ERP 엑셀 → 배정표 → 「기록서 엑셀」을 받습니다.'),
+        h('li', null, '그 파일을 실사자들에게 보냅니다(SharePoint · 메일 · 메신저 등).'),
+        h('li', null, '실사자(N명): 휴대폰에서 이 주소를 열고 「받은 기록서 엑셀 넣기」 → 작성자 이름 → 「내 배정만」 보고 입력합니다. 같은 파일을 넣은 휴대폰은 모두 같은 실사 회차가 됩니다.'),
+        h('li', null, '다 적으면 ② 현장 입력 맨 아래 「결과 파일 받기」(사진이 있으면 「사진도 넣기」)로 받아 사무실에 보냅니다.'),
+        h('li', null, '사무실: ③ 취합에 결과 파일을 모두 넣으면 합쳐집니다. 여러 번 보내도 같은 기록은 한 번만 들어갑니다.')),
+      h('p', { class: 'note' }, '기록은 각 기기의 브라우저에만 저장됩니다(서버로 보내지 않음). 그래서 주소만 열면 빈 화면이고, 기록서 엑셀을 넣어야 작업지시가 보입니다. 넣지 않고 바로 실시간으로 쌓이게 하는 것은 2단계(회사가 허용한 공유 DB 또는 SharePoint 목록)입니다.'));
   }
   function today() { return L.localIso().slice(0, 10); }
 
@@ -138,9 +164,18 @@
         tile('순차이 금액', L.fmtSigned(a.netAmt, true), '절대 차이 ' + W(a.absAmt))),
       an.conflicts.length ? h('p', { class: 'alert warn' }, '두 사람이 따로 센 수량이 다른 품목 ' + an.conflicts.length + '개 — ', h('a', { href: '#/merge' }, '③ 취합'), '에서 채택할 기록을 골라 주세요.') : null,
       h('section', { class: 'card' }, h('h2', null, '실사자별 진행'),
-        C.figure('실사자별 진행률(%)', { type: 'hbar', unit: '%', labels: asg.map(function (x) { return x.key; }), series: [{ name: '진행률', values: asg.map(function (x) { return x.progress; }), color: 'var(--series-1)', colors: asg.map(function (x) { return x.progress < 0.8 ? 'var(--series-2)' : 'var(--series-1)'; }) }] }),
-        table(['실사자', '배정', '완료', '진행률', '차이', '충돌'], asg.map(function (x) { return [x.key, N(x.items), N(x.counted), pct(x.progress), N(x.diffItems), x.conflicts ? N(x.conflicts) : '']; }), { num: [0, 1, 1, 1, 1, 1] })),
+        C.figure('실사자별 배정 진행률(%)', { type: 'hbar', unit: '%', labels: asg.filter(function (x) { return x.items; }).map(function (x) { return x.key; }), series: [{ name: '진행률', values: asg.filter(function (x) { return x.items; }).map(function (x) { return x.progress; }), color: 'var(--series-1)', colors: asg.filter(function (x) { return x.items; }).map(function (x) { return x.progress < 0.8 ? 'var(--series-2)' : 'var(--series-1)'; }) }] }),
+        personTable(asg, false)),
       flowCard()];
+  }
+  /* 실사자별 표 — 배정 · 배정 진행률은 배정표 기준, 직접 센 품목 · 일치 · 차이는 기록의 작성자(By) 기준 (11-08) */
+  function personTable(asg, detail) {
+    var head = ['실사자', '배정 품목', '직접 센 품목', '배정 진행률'].concat(detail ? ['일치', '차이', '사유 미입력'] : ['차이', '충돌']).concat(['다른 사람이 셈 / 대신 셈']);
+    return [table(head, asg.map(function (x) {
+      var cross = (x.byOthers ? '배정 중 ' + N(x.byOthers) + '개를 다른 사람이' : '') + (x.byOthers && x.forOthers ? ' · ' : '') + (x.forOthers ? '남의 배정 ' + N(x.forOthers) + '개를 대신' : '');
+      return [x.key, x.items ? N(x.items) : '-', N(x.counted), x.items ? pct(x.progress) : '-'].concat(detail ? [N(x.matched), N(x.diffItems), x.noReason ? N(x.noReason) : ''] : [N(x.diffItems), x.conflicts ? N(x.conflicts) : '']).concat([cross]);
+    }), { num: detail ? [0, 1, 1, 1, 1, 1, 1, 0] : [0, 1, 1, 1, 1, 1, 0] }),
+      h('p', { class: 'note' }, '「직접 센 품목 · 일치 · 차이」는 실제로 센 사람(기록의 작성자 By) 기준이고, 「배정 품목 · 배정 진행률」은 배정표 기준입니다(배정된 품목은 누가 세었든 확인되면 진행으로 셈). 그래서 남의 배정을 대신 센 사람도 직접 센 품목에 나옵니다.')];
   }
   function flowCard() {
     var steps = [
@@ -358,6 +393,8 @@
         h('li', null, '이 파일을 SharePoint 에 올립니다(지금처럼 취합 파일 1개).'),
         h('li', null, '각자 자기 이름 시트에(또는 전체 시트의 자기 줄에) 실물수량을 적고, 차이가 있으면 사유를 적습니다. 휴대폰으로 이 도구에서 적은 사람은 「결과 엑셀 받기」 파일을 보내도 됩니다.'),
         h('li', null, '다 채운 SharePoint 파일을 내려받아 ③ 취합에 그대로 넣습니다. 여러 번 넣어도 같은 기록은 한 번만 들어갑니다.')),
+      h('p', { class: 'alert info' }, '휴대폰으로 입력할 사람에게도 이 파일을 보내 주세요. 휴대폰에서 이 주소를 열고 「받은 기록서 엑셀 넣기」를 누르면 같은 작업지시가 생기고, 다 적은 뒤 「결과 파일」을 보내면 ③ 취합에서 합쳐집니다(주소만 열면 빈 화면입니다 — 기록이 기기마다 따로 저장되기 때문).'),
+      teamSteps(),
       h('div', { class: 'btn-row' },
         h('button', { type: 'button', class: 'btn btn-primary', onclick: xlsx }, '기록서 엑셀 (SharePoint 취합용)'),
         h('button', { type: 'button', class: 'btn', onclick: printOrder }, '인쇄용 기록서')),
@@ -649,8 +686,7 @@
             x.resolved ? h('button', { type: 'button', class: 'btn btn-sm', onclick: function () { delete db.picks[x.no]; save(); render(); } }, '고른 것 취소') : null);
         })) : h('p', { class: 'note' }, '충돌이 없습니다.'),
         h('p', { class: 'note' }, '같은 사람이 다시 센 것은 충돌이 아니라 정정으로 보고 마지막 기록을 씁니다.')),
-      h('section', { class: 'card' }, h('h2', null, '실사자별 진행'),
-        table(['실사자', '배정', '완료', '진행률', '일치', '차이', '사유 미입력'], asg.map(function (x) { return [x.key, N(x.items), N(x.counted), pct(x.progress), N(x.matched), N(x.diffItems), x.noReason ? N(x.noReason) : '']; }), { num: [0, 1, 1, 1, 1, 1, 1] }))];
+      h('section', { class: 'card' }, h('h2', null, '실사자별 진행'), personTable(asg, true))];
   }
 
   /* ── ④ 차이대사 ─────────────────────────── */
@@ -688,9 +724,31 @@
         return { cls: r.conflict ? 'differs' : r.counted ? null : 'small', tdCls: [null, null, null, null, null, r.diff ? 'over' : null, null, null, r.over ? 'over' : null],
           cells: [r.code || r.no, r.wh + ' · ' + r.loc, r.name || r.code, N(r.sys), r.counted ? N(r.cnt) : '-', r.counted ? L.fmtSigned(r.diff) : '-', r.counted ? L.fmtSigned(r.diffAmt, true) : '-',
             r.rate == null ? (r.counted && r.diff ? '신규' : '-') : L.pctText(r.rate, 1), r.status + (r.conflict ? ' · 충돌' : ''), r.reason, r.note,
-            r.counted ? r.by + ' ' + L.fmtTime(r.at) : '', r.counted ? (r.recCount > 1 ? r.recCount + '건' : '1건') + (r.photo ? ' · 사진' : '') : ''] };
+            r.counted ? r.by + ' ' + L.fmtTime(r.at) : '', r.counted ? [(r.recCount > 1 ? r.recCount + '건' : '1건'), photoCell(r)] : ''] };
       }), { num: [0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0] }),
       h('p', { class: 'note' }, rows.length + '품목' + (rows.length > 300 ? ' 중 처음 300개' : '') + ' · 차이 금액 큰 순 · 모두 보려면 ⑥ 보고서의 엑셀 결과서(「전체 대사표」)')];
+  }
+
+  /* 차이대사 「사진」 — 누르면 크게 봄 (11-08 수강생 TEST: 사진 있음 표시만 있고 볼 수 없었음) */
+  function photoCell(r) {
+    if (r.photoSrc) return [' · ', h('button', { type: 'button', class: 'btn btn-sm photo-btn', onclick: function () { showPhoto(r); } },
+      h('img', { src: r.photoSrc, alt: '', class: 'photo-thumb' }), r.photoOld ? '이전 사진' : '사진 보기')];
+    if (r.photoOmitted) return h('span', { class: 'note', title: '결과 파일(JSON)을 「사진도 넣기」 없이 내보내 사진이 빠졌습니다. 찍은 휴대폰에서 「사진도 넣기」를 켜고 결과 파일을 다시 받아 ③ 취합에 넣으면 볼 수 있습니다.' }, ' · 사진(파일에 안 담김)');
+    return null;
+  }
+  function showPhoto(r) {
+    var dlg = h('dialog', { class: 'dialog photo-dialog', 'aria-label': '현장 사진' },
+      h('div', { class: 'dialog-body' },
+        h('h2', null, (r.code || r.no) + ' ' + (r.name || '')),
+        h('p', { class: 'note' }, r.wh + ' · ' + r.loc + ' · 시스템 ' + N(r.sys) + ' / 실물 ' + N(r.cnt) + (r.reason ? ' · ' + r.reason : '') + ' · ' + r.by + ' ' + L.fmtTime(r.at) + (r.photoOld ? ' · 같은 품목의 이전 기록 사진' : '')),
+        h('img', { src: r.photoSrc, alt: (r.name || r.no) + ' 현장 사진', class: 'photo-full' }),
+        h('div', { class: 'dialog-actions' },
+          h('a', { class: 'btn', href: r.photoSrc, download: '현장사진_' + String(r.code || r.no).replace(/[\\/:*?"<>|]/g, '_') + '.jpg' }, '사진 받기'),
+          h('button', { type: 'button', class: 'btn btn-primary', onclick: function () { dlg.close(); } }, '닫기'))));
+    dlg.addEventListener('close', function () { dlg.remove(); });
+    dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
+    document.body.appendChild(dlg);
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
   }
 
   /* ── ⑤ 분석(BI) ─────────────────────────── */
@@ -703,21 +761,39 @@
     var tog = h('div', { class: 'view-toggle', role: 'group', 'aria-label': '기준' }, dims.map(function (d) {
       return h('button', { type: 'button', 'aria-pressed': ui.dim === d[0] ? 'true' : 'false', onclick: function () { ui.dim = d[0]; render(); } }, d[1]);
     }));
-    var g = an.dims[ui.dim], label = L.DIMS[ui.dim].label;
+    var g = an.dims[ui.dim], label = L.DIMS[ui.dim].label, person = ui.dim === 'assignee';
     var man = function (v) { return L.round(v / 10000, 1); };
     var rs = an.reasons.filter(function (x) { return x.items; }).sort(function (a, b) { return b.absAmt - a.absAmt; });
+    // 11-08 수강생: 창고가 많으면 그래프 이름이 겹쳐 안 보임 → 아래 표에서 고른 행만 그래프에 그림(처음엔 절대 차이 상위 8개)
+    if (ui.biPickSid !== db.session.id) { ui.biPick = {}; ui.biPickSid = db.session.id; } // 새 실사 회차면 처음 값으로
+    var picks = ui.biPick[ui.dim];
+    if (!picks) picks = ui.biPick[ui.dim] = L.defaultPicks(g, BI_TOP);
+    var shown = g.filter(function (x) { return picks.indexOf(x.key) >= 0; });
+    function setPicks(list) { ui.biPick[ui.dim] = list; render(); }
+    var lbl = function (x) { return x.label || x.key; };
+    var chartNote = shown.length ? null : h('p', { class: 'note' }, '아래 표에서 그래프에 그릴 행을 골라 주세요.');
     return [head,
       h('section', { class: 'card no-print' }, tog),
+      chartNote,
       h('div', { class: 'charts' },
-        C.figure(label + ' 진행률·정확도(%)', { type: 'bar', unit: '%', labels: g.map(function (x) { return x.key; }), series: [
-          { name: '진행률', values: g.map(function (x) { return x.progress; }), color: 'var(--series-1)' },
-          { name: '정확도', values: g.map(function (x) { return x.accuracy; }), color: 'var(--series-3)' }] }),
-        C.figure(label + ' 차이 금액(만원)', { type: 'bar', unit: '', labels: g.map(function (x) { return x.key; }), series: [
-          { name: '증가', values: g.map(function (x) { return man(x.plusAmt); }), color: 'var(--series-1)' },
-          { name: '감소(절댓값)', values: g.map(function (x) { return man(Math.abs(x.minusAmt)); }), color: 'var(--series-2)' }] })),
-      table([label, '품목', '완료', '진행률', '정확도', '차이', '허용 초과', '장부금액', '증가', '감소', '순차이', '절대 차이'], g.map(function (x) {
-        return [x.key, N(x.items), N(x.counted), pct(x.progress), pct(x.accuracy), N(x.diffItems), N(x.overItems), W(x.sysAmt), W(x.plusAmt), W(Math.abs(x.minusAmt)), L.fmtSigned(x.netAmt, true), W(x.absAmt)];
-      }).concat([{ cls: 'sum', cells: ['전체', N(an.all.items), N(an.all.counted), pct(an.all.progress), pct(an.all.accuracy), N(an.all.diffItems), N(an.all.overItems), W(an.all.sysAmt), W(an.all.plusAmt), W(Math.abs(an.all.minusAmt)), L.fmtSigned(an.all.netAmt, true), W(an.all.absAmt)] }]), { num: [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }),
+        C.figure(label + ' 진행률·정확도(%) — ' + shown.length + '/' + g.length + '개', { type: 'bar', unit: '%', labels: shown.map(lbl), series: [
+          { name: person ? '배정 진행률' : '진행률', values: shown.map(function (x) { return x.progress; }), color: 'var(--series-1)' },
+          { name: '정확도', values: shown.map(function (x) { return x.accuracy; }), color: 'var(--series-3)' }] }),
+        C.figure(label + ' 차이 금액(만원) — ' + shown.length + '/' + g.length + '개', { type: 'bar', unit: '', labels: shown.map(lbl), series: [
+          { name: '증가', values: shown.map(function (x) { return man(x.plusAmt); }), color: 'var(--series-1)' },
+          { name: '감소(절댓값)', values: shown.map(function (x) { return man(Math.abs(x.minusAmt)); }), color: 'var(--series-2)' }] })),
+      h('div', { class: 'btn-row no-print bi-pick' },
+        h('span', { class: 'note' }, '그래프에 그릴 행: 표 왼쪽 칸을 고르세요(' + shown.length + '개 고름).'),
+        h('button', { type: 'button', class: 'btn btn-sm', onclick: function () { setPicks(L.defaultPicks(g, BI_TOP)); } }, '절대 차이 상위 ' + BI_TOP + '개'),
+        h('button', { type: 'button', class: 'btn btn-sm', onclick: function () { setPicks(g.map(function (x) { return x.key; })); } }, '모두'),
+        h('button', { type: 'button', class: 'btn btn-sm', onclick: function () { setPicks([]); } }, '모두 해제'),
+        shown.length > 12 ? h('span', { class: 'note' }, '12개가 넘으면 이름이 잘립니다(막대에 마우스를 올리면 전체 이름).') : null),
+      table(['그래프', label, person ? '배정 품목' : '품목', person ? '직접 센 품목' : '완료', person ? '배정 진행률' : '진행률', '정확도', '차이', '허용 초과', '장부금액', '증가', '감소', '순차이', '절대 차이'], g.map(function (x) {
+        var cb = h('input', { type: 'checkbox', 'aria-label': lbl(x) + ' 그래프에 그리기' }); cb.checked = picks.indexOf(x.key) >= 0;
+        cb.addEventListener('change', function () { var list = picks.filter(function (k) { return k !== x.key; }); if (cb.checked) list.push(x.key); setPicks(list); });
+        return [cb, h('span', { title: x.key }, lbl(x)), x.items || !person ? N(x.items) : '-', N(x.counted), x.progress == null ? '-' : pct(x.progress), pct(x.accuracy), N(x.diffItems), N(x.overItems), W(x.sysAmt), W(x.plusAmt), W(Math.abs(x.minusAmt)), L.fmtSigned(x.netAmt, true), W(x.absAmt)];
+      }).concat([{ cls: 'sum', cells: ['', '전체', N(an.all.items), N(an.all.counted), pct(an.all.progress), pct(an.all.accuracy), N(an.all.diffItems), N(an.all.overItems), W(an.all.sysAmt), W(an.all.plusAmt), W(Math.abs(an.all.minusAmt)), L.fmtSigned(an.all.netAmt, true), W(an.all.absAmt)] }]), { num: [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], cls: 'bi' }),
+      person ? h('p', { class: 'note' }, '실사자별: 배정 품목 · 배정 진행률은 배정표 기준, 직접 센 품목 · 정확도 · 차이 · 금액은 실제로 센 사람(기록의 작성자 By) 기준입니다.') : null,
       h('h2', { class: 'sec', style: 'margin-top:20px' }, '사유별'),
       h('div', { class: 'charts' },
         C.figure('사유별 차이 품목 수', { type: 'hbar', unit: '개', labels: rs.map(function (x) { return x.key; }), series: [{ name: '품목', values: rs.map(function (x) { return x.items; }), color: 'var(--series-1)', colors: rs.map(function (x) { return x.key === L.NO_REASON ? 'var(--series-plan)' : 'var(--series-1)'; }) }] }),
@@ -775,9 +851,12 @@
       an.excluded.length ? h('p', { class: 'note' }, '이번 실사 제외: ' + an.excluded.map(function (x) { return L.whLabel(x) + ' ' + N(x.items) + '품목 ' + W(x.sysAmt) + (x.note ? '(' + x.note + ')' : ''); }).join(' · ')) : null,
       h('h2', null, '2. 창고 · 창고위치' + (an.hasDim.mtype ? ' · 자재유형' : '') + (an.hasDim.mkind ? ' · 자재타입' : '') + '별'),
       h('div', { class: 'charts' },
-        C.figure('창고별 차이 금액(만원)', { type: 'bar', labels: an.dims.wh.map(function (x) { return x.key; }), series: [
-          { name: '증가', values: an.dims.wh.map(function (x) { return man(x.plusAmt); }), color: 'var(--series-1)' },
-          { name: '감소(절댓값)', values: an.dims.wh.map(function (x) { return man(Math.abs(x.minusAmt)); }), color: 'var(--series-2)' }] }),
+        (function () {
+          var top = L.defaultPicks(an.dims.wh, BI_TOP), wl = an.dims.wh.filter(function (x) { return top.indexOf(x.key) >= 0; });
+          return C.figure('창고별 차이 금액(만원)' + (an.dims.wh.length > wl.length ? ' — 절대 차이 상위 ' + wl.length + '곳' : ''), { type: 'bar', labels: wl.map(function (x) { return x.label || x.key; }), series: [
+            { name: '증가', values: wl.map(function (x) { return man(x.plusAmt); }), color: 'var(--series-1)' },
+            { name: '감소(절댓값)', values: wl.map(function (x) { return man(Math.abs(x.minusAmt)); }), color: 'var(--series-2)' }] });
+        })(),
         C.figure('사유별 절대 차이 금액(만원)', { type: 'hbar', labels: rs.map(function (x) { return x.key; }), series: [{ name: '금액', values: rs.map(function (x) { return man(x.absAmt); }), color: 'var(--series-2)' }] })),
       L.DIM_SHEETS.filter(function (d) { return d[0] !== 'assignee' && an.hasDim[d[0]]; }).map(function (d) { return dimTable(d[0], d[1]); }),
       h('h2', null, '3. 사유별'),

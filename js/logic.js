@@ -18,7 +18,7 @@
   'use strict';
   /* 판(版) — index.html 의 ?v= · app.js 의 APP_VERSION 과 같아야 합니다(scripts/bump-version.mjs 로 함께 올림).
      브라우저가 옛 logic.js 와 새 app.js 를 섞어 쓰면 app.js 가 이 값을 보고 계산을 멈춥니다. */
-  var VERSION = '2026-10-28.1';
+  var VERSION = '2026-11-08.1';
 
   var SCHEMA_VERSION = 1;
   var RESULT_KIND = 'data10-14.result';
@@ -861,11 +861,11 @@
     return items.map(function (it) {
       var rs = res[it.no], c = rs ? rs.current : null;
       var row = {
-        no: it.no, code: it.code, name: it.name, spec: it.spec, unit: it.unit, wh: whLabel(it), whCode: it.wh, site: it.site || '(빈칸)', loc: it.loc, zone: whLabel(it) + ' / ' + zoneOf(it.loc),
+        no: it.no, code: it.code, name: it.name, spec: it.spec, unit: it.unit, wh: whLabel(it), whCode: it.wh, whName: it.whName || it.wh, site: it.site || '(빈칸)', loc: it.loc, zone: whLabel(it) + ' / ' + zoneOf(it.loc),
         manager: managerOf(it, session),
         mtype: it.mtype || '(빈칸)', mkind: it.mkind || '(빈칸)', sys: it.sys, price: it.price, sysAmt: it.sys * it.price,
         assignee: it.extra ? (c ? c.by : '') : (assigneeOf(it, session, db.assign) || '(미배정)'), extra: !!it.extra,
-        counted: !!c, cnt: null, diff: null, diffAmt: null, rate: null, status: '미실사', over: false, reason: '', note: '', by: '', at: '', rid: '', src: '', photo: false,
+        counted: !!c, cnt: null, diff: null, diffAmt: null, rate: null, status: '미실사', over: false, reason: '', note: '', by: '', at: '', rid: '', src: '', photo: false, photoSrc: '', photoOld: false, photoOmitted: false,
         recCount: rs ? rs.recs.length : 0, conflict: !!(rs && rs.conflict), resolved: !!(rs && rs.resolved), corrected: !!(rs && rs.corrected)
       };
       if (!c) return row;
@@ -873,6 +873,11 @@
       row.rate = it.sys ? row.diff / it.sys : (row.diff ? null : 0);
       row.reason = row.diff !== 0 ? (c.reason || NO_REASON) : (c.reason || '');
       row.note = c.note || ''; row.by = c.by; row.at = c.at; row.rid = c.rid; row.src = (c.src || '') + (c.file ? ' · ' + c.file : ''); row.photo = !!(c.photo);
+      // 11-08 수강생 TEST: 「사진」 표시만 있고 볼 수 없었음 → 볼 수 있는 사진(data:image)을 함께 넘김.
+      // 채택한 기록에 사진이 없으면 같은 품목의 이전 기록 사진을, 결과 파일에 사진이 빠진 것('omitted')은 따로 알림.
+      var ph = isPhoto(c.photo) ? c : rs.recs.slice().reverse().filter(function (x) { return isPhoto(x.photo); })[0];
+      if (ph) { row.photo = true; row.photoSrc = ph.photo; row.photoOld = ph !== c; }
+      else if (c.photo === 'omitted') row.photoOmitted = true;
       if (row.diff === 0) row.status = '일치';
       else if (S.tolMode !== 'range') { row.over = true; row.status = '차이(사유 필수)'; }
       else {
@@ -882,6 +887,8 @@
       return row;
     });
   }
+
+  function isPhoto(p) { return typeof p === 'string' && /^data:image\//.test(p); }
 
   /* ── 8. 집계 (BI) ───────────────────────────────────────────── */
   function emptyAgg(key) { return { key: key, items: 0, counted: 0, matched: 0, diffItems: 0, overItems: 0, sysAmt: 0, cntAmt: 0, plusAmt: 0, minusAmt: 0, netAmt: 0, absAmt: 0, plusQty: 0, minusQty: 0, conflicts: 0, noReason: 0 }; }
@@ -905,9 +912,50 @@
   /* dim: wh · zone · mtype · mkind · assignee */
   function summarize(rows, dim) {
     var by = {}, list = [];
-    rows.forEach(function (r) { var k = r[dim] || '(빈칸)'; if (!by[k]) { by[k] = emptyAgg(k); list.push(by[k]); } addRow(by[k], r); });
+    rows.forEach(function (r) { var k = r[dim] || '(빈칸)'; if (!by[k]) { by[k] = emptyAgg(k); by[k].label = dim === 'wh' ? r.whName || k : k; list.push(by[k]); } addRow(by[k], r); });
     list.forEach(finish);
+    uniqueLabels(list);
     return list.sort(function (a, b) { return b.absAmt - a.absAmt || b.items - a.items || cmp(a.key, b.key); });
+  }
+  /* 그래프 눈금 이름이 겹치면(창고 이름만 같은 두 창고) 코드까지 붙인 원래 이름으로 */
+  function uniqueLabels(list) {
+    var n = {}; list.forEach(function (a) { n[a.label] = (n[a.label] || 0) + 1; });
+    list.forEach(function (a) { if (n[a.label] > 1) a.label = a.key; });
+    return list;
+  }
+  /* 실사자별 — 11-08 수강생 TEST: 결과 파일의 By(작성자)가 다른 사람인데 배정받은 사람 쪽에 셈해졌음.
+     배정 품목 · 배정 진행률은 배정표 기준, 직접 센 품목 · 일치 · 차이 · 금액은 채택한 기록의 작성자(By) 기준으로 나눕니다.
+     items = 배정 품목, done = 배정 중 확인된 품목(누가 세었든), progress = done ÷ items,
+     counted = 이 사람이 직접 센 품목(배정과 무관), byOthers = 배정 중 다른 사람이 센 품목, forOthers = 남의 배정을 대신 센 품목 */
+  function personStats(rows) {
+    var by = {}, list = [];
+    function get(k) { k = k || '(빈칸)'; if (!by[k]) { by[k] = emptyAgg(k); by[k].label = k; by[k].done = 0; by[k].byOthers = 0; by[k].forOthers = 0; list.push(by[k]); } return by[k]; }
+    rows.forEach(function (r) {
+      var own = r.assignee || '(미배정)', who = r.counted ? (r.by || own) : '';
+      var a = get(own);
+      a.items++; a.sysAmt += r.sysAmt; if (r.conflict) a.conflicts++;
+      if (r.counted) { a.done++; if (who !== own) a.byOthers++; }
+      if (!r.counted) return;
+      var b = get(who);
+      if (who !== own) b.forOthers++;
+      b.counted++; b.cntAmt += r.cnt * r.price;
+      if (r.diff === 0) { b.matched++; return; }
+      b.diffItems++; if (r.over) b.overItems++; if (r.reason === NO_REASON) b.noReason++;
+      if (r.diffAmt > 0) b.plusAmt += r.diffAmt; else b.minusAmt += r.diffAmt;
+      if (r.diff > 0) b.plusQty += r.diff; else b.minusQty += r.diff;
+      b.netAmt += r.diffAmt; b.absAmt += Math.abs(r.diffAmt);
+    });
+    list.forEach(function (a) {
+      a.progress = a.items ? a.done / a.items : null;
+      a.accuracy = a.counted ? a.matched / a.counted : null;
+      a.amtAccuracy = a.sysAmt ? 1 - a.absAmt / a.sysAmt : null;
+    });
+    return list.sort(function (a, b) { return b.absAmt - a.absAmt || b.items - a.items || cmp(a.key, b.key); });
+  }
+  /* 분석(BI) 그래프에 처음 그릴 행 — 절대 차이 금액이 큰 n 개(차이가 없으면 품목 수 순) */
+  function defaultPicks(list, n) {
+    n = n == null ? 8 : n;
+    return (list || []).slice().sort(function (a, b) { return b.absAmt - a.absAmt || b.items - a.items || cmp(a.key, b.key); }).slice(0, n).map(function (a) { return a.key; });
   }
   /* 사유별 — 차이가 있는 품목만. 사유가 빈 차이는 「사유 미입력」 */
   function reasonStats(rows, reasons) {
@@ -944,7 +992,7 @@
     var rows = varianceRows(db), S = cleanSettings(db.settings), session = db.session;
     return {
       rows: rows, S: S, session: db.session, all: overall(rows),
-      dims: { wh: summarize(rows, 'wh'), site: summarize(rows, 'site'), mtype: summarize(rows, 'mtype'), mkind: summarize(rows, 'mkind'), assignee: summarize(rows, 'assignee') },
+      dims: { wh: summarize(rows, 'wh'), site: summarize(rows, 'site'), mtype: summarize(rows, 'mtype'), mkind: summarize(rows, 'mkind'), assignee: personStats(rows) },
       // 파일에 그 열이 없어 모두 「(빈칸)」인 기준은 화면·보고서에서 숨깁니다(예: 견본 ERP 에는 자재유형·자재타입이 없음)
       hasDim: { wh: true, assignee: true, site: hasValues(rows, 'site'), mtype: hasValues(rows, 'mtype'), mkind: hasValues(rows, 'mkind') },
       reasonList: reasonList(S), excluded: (session && session.excluded) || [],
@@ -967,9 +1015,9 @@
   }
   function verText(meta) { return meta ? 'v' + meta.ver + ' (' + fmtTime(meta.issuedAt) + ' 발행)' : '초안(아직 발행 안 함)'; }
   var DIM_SHEETS = [['wh', '창고별'], ['site', '창고위치별'], ['mtype', '자재유형별'], ['mkind', '자재타입별'], ['assignee', '실사자별']];
-  function aggHead(label) { return [label, '품목 수', '실사 완료', '진행률(%)', '일치', '정확도(%)', '차이 품목', '허용 초과', '장부금액', '증가 금액', '감소 금액', '순차이 금액', '절대 차이 금액']; }
+  function aggHead(label, person) { return person ? [label, '배정 품목', '직접 센 품목', '배정 진행률(%)', '일치', '정확도(%)', '차이 품목', '허용 초과', '배정 장부금액', '증가 금액', '감소 금액', '순차이 금액', '절대 차이 금액'] : [label, '품목 수', '실사 완료', '진행률(%)', '일치', '정확도(%)', '차이 품목', '허용 초과', '장부금액', '증가 금액', '감소 금액', '순차이 금액', '절대 차이 금액']; }
   function aggRow(a) {
-    return [a.key, a.items, a.counted, round(a.progress * 100, 1), a.matched, a.accuracy == null ? '' : round(a.accuracy * 100, 1), a.diffItems, a.overItems,
+    return [a.key, a.items, a.counted, a.progress == null ? '' : round(a.progress * 100, 1), a.matched, a.accuracy == null ? '' : round(a.accuracy * 100, 1), a.diffItems, a.overItems,
       Math.round(a.sysAmt), Math.round(a.plusAmt), Math.round(a.minusAmt), Math.round(a.netAmt), Math.round(a.absAmt)];
   }
   var DETAIL_HEAD = ['재고번호', '창고', '창고위치', '보관 자리', '자재코드', '자재명', '규격', '단위', '자재유형', '자재타입', '담당자', '실사자', '시스템수량', '실사수량', '수량 차이', '단가', '차이 금액', '차이율(%)', '판정', '사유', '특이사항',
@@ -1000,7 +1048,7 @@
     if ((db.reports || []).length) { info.push([]); info.push(['발행 이력', '발행 시각', '기록 수', '실사 완료', '순차이 금액']); db.reports.forEach(function (m) { info.push(['v' + m.ver, fmtTime(m.issuedAt), m.records, m.counted, m.netAmt]); }); }
     var sheets = [{ name: '보고서 정보', aoa: info }];
     DIM_SHEETS.filter(function (d) { return an.hasDim[d[0]]; }).forEach(function (d) {
-      sheets.push({ name: d[1], aoa: [aggHead(DIMS[d[0]].label)].concat(an.dims[d[0]].map(aggRow)).concat([aggRow(a)]) });
+      sheets.push({ name: d[1], aoa: [aggHead(DIMS[d[0]].label, d[0] === 'assignee')].concat(an.dims[d[0]].map(aggRow)).concat([aggRow(a)]) });
     });
     sheets.push({ name: '사유별', aoa: [['사유', '차이 품목', '비중(%)', '증가 금액', '감소 금액', '순차이 금액', '절대 차이 금액', '금액 비중(%)']].concat(an.reasons.map(function (x) {
       return [x.key, x.items, round(x.share * 100, 1), Math.round(x.plusAmt), Math.round(x.minusAmt), Math.round(x.netAmt), Math.round(x.absAmt), round(x.amtShare * 100, 1)];
@@ -1121,7 +1169,7 @@
     orderSheets: orderSheets, parseOrderWorkbook: parseOrderWorkbook, sortForWalk: sortForWalk, bookCols: bookCols, reasonList: reasonList, tolText: tolText, MAIN_SHEET: MAIN_SHEET, COUNT_HEAD: COUNT_HEAD, DIM_SHEETS: DIM_SHEETS,
     matchReason: matchReason, newRid: newRid, validateCount: validateCount, parseCountSheet: parseCountSheet,
     resultFile: resultFile, checkResultFile: checkResultFile, mergeRecords: mergeRecords, resolveCounts: resolveCounts, conflictList: conflictList,
-    cleanSettings: cleanSettings, extraItems: extraItems, varianceRows: varianceRows, overall: overall, summarize: summarize, reasonStats: reasonStats, topDiffs: topDiffs, progressByHour: progressByHour, analyze: analyze,
+    cleanSettings: cleanSettings, extraItems: extraItems, varianceRows: varianceRows, overall: overall, summarize: summarize, personStats: personStats, defaultPicks: defaultPicks, isPhoto: isPhoto, reasonStats: reasonStats, topDiffs: topDiffs, progressByHour: progressByHour, analyze: analyze,
     nextReportMeta: nextReportMeta, verText: verText, reportSheets: reportSheets, buildReportText: buildReportText, buildAiPromptInfo: buildAiPromptInfo, unmaskText: unmaskText,
     formatCells: formatCells, isDateHead: isDateHead, searchItems: searchItems, emptyDb: emptyDb, restoreDb: restoreDb
   };

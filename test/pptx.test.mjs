@@ -80,6 +80,13 @@ async function checkPkg(buf) {
   assert.equal(slideParts.length, ids.length, '슬라이드 파트 수 = 목록 수(남은 파트 없음)');
   const notesOwner = {};
   names.filter(n => /^ppt\/slides\/_rels\//.test(n)).forEach(n => { for (const m of text[n].matchAll(/Target="\.\.\/notesSlides\/([^"]+)"/g)) { assert.ok(!notesOwner[m[1]], '메모 슬라이드 공유 ' + m[1]); notesOwner[m[1]] = n; } });
+  // 11-08: PowerPoint 가 「복구」하며 슬라이드를 비우는 고유값 겹침 — 표 안 줄 번호(a16:rowId), 슬라이드 번호(p14:creationId), 개체 번호(a16:creationId)
+  const slideXml = slideParts.map(n => text[n]);
+  slideXml.forEach((x, i) => { for (const t of x.matchAll(/<a:tbl>[\s\S]*?<\/a:tbl>/g)) { const ids = [...t[0].matchAll(/<a16:rowId\b[^>]*\sval="(\d+)"/g)].map(m => m[1]); assert.equal(new Set(ids).size, ids.length, slideParts[i] + ' 표 안 a16:rowId 겹침'); } });
+  const cids = slideXml.flatMap(x => [...x.matchAll(/<p14:creationId\b[^>]*\sval="(\d+)"/g)].map(m => m[1]));
+  assert.equal(new Set(cids).size, cids.length, '슬라이드 p14:creationId 겹침');
+  const gids = slideXml.flatMap(x => [...x.matchAll(/<a16:creationId\b[^>]*\sid="(\{[^"]+\})"/g)].map(m => m[1]));
+  assert.equal(new Set(gids).size, gids.length, '개체 a16:creationId 겹침');
   const app = text['docProps/app.xml'];
   if (app && /<Slides>/.test(app)) assert.equal(+/<Slides>(\d+)<\/Slides>/.exec(app)[1], ids.length, 'app.xml 슬라이드 수');
   return { z, names, text, ids };
@@ -274,6 +281,30 @@ await test('메모 슬라이드(발표자 노트)가 달린 양식 — 지운 �
   const r = await make(withNotes);
   const k = await checkPkg(r.out);
   assert.ok(!k.names.some(n => /^ppt\/notesSlides\//.test(n)), '지운 차이 슬라이드의 노트는 함께 지움');
+});
+
+await test('PowerPoint 로 저장한 직전 보고서(줄 번호 a16:rowId · 슬라이드 번호 p14:creationId 가 붙은 양식) — 본뜬 장마다 번호가 겹치지 않음(11-08 TEST: 첫 차이 장만 보이던 결함)', async () => {
+  // 리포의 가상 양식에 PowerPoint 가 저장할 때 붙이는 고유값을 넣어 「PowerPoint 로 한 번 저장한」 모양을 만듦
+  const z = await JSZip.loadAsync(TPL);
+  const A16 = 'xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main"';
+  let seq = 0;
+  for (const n of Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))) {
+    let x = await z.file(n).async('string');
+    x = x.replace(/<\/a:tr>/g, () => '<a:extLst><a:ext uri="{0D108BD9-81ED-4DB2-BD59-A6C34878D82A}"><a16:rowId ' + A16 + ' val="' + (3000000000 + (++seq)) + '"/></a:ext></a:extLst></a:tr>');
+    x = x.replace(/<p:cNvPr id="(\d+)" name="([^"]*)"\/>/g, (m, id, nm) => '<p:cNvPr id="' + id + '" name="' + nm + '"><a:extLst><a:ext uri="{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}"><a16:creationId ' + A16 + ' id="{6A1B2C3D-0000-4000-8000-' + String(++seq).padStart(12, '0') + '}"/></a:ext></a:extLst></p:cNvPr>');
+    x = x.replace('</p:clrMapOvr>', '</p:clrMapOvr><p:extLst><p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}"><p14:creationId xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" val="' + (2754183745 + (++seq)) + '"/></p:ext></p:extLst>');
+    z.file(n, x);
+  }
+  const saved = await z.generateAsync({ type: 'nodebuffer' });
+  await checkPkg(saved); // 넣은 양식 자체는 정상
+  const r = await make(saved);
+  assert.ok(r.log.diffPages >= 3, '차이 장이 여러 장이어야 검사가 뜻이 있음 ' + r.log.diffPages);
+  const k = await checkPkg(r.out);
+  assert.equal(k.ids.length, 1 + r.log.diffPages + 1);
+  const d = await dump(r.out);
+  const diffs = d.filter(s => s.tables.some(t => t.kind === 'diff'));
+  assert.equal(diffs.length, r.log.diffPages, '차이 장마다 표가 남아 있음');
+  assert.ok(diffs.every(s => s.tables.find(t => t.kind === 'diff').rows.length >= 2), '차이 장마다 머리 + 줄');
 });
 
 console.log('만들기 — 기본 양식');

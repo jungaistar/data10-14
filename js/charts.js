@@ -21,6 +21,32 @@
     if (unit === '%2') return (Math.round(v * 10000) / 100) + '%';
     return (Math.round(v * 10) / 10).toLocaleString('ko-KR') + (unit ? unit : '');
   }
+  /* 눈금 이름 줄바꿈 — 한글 · 전각은 1칸, 영문 · 숫자 · 기호는 0.55칸으로 셈. 넘치면 마지막 줄 끝을 「…」 (11-08 수강생: 창고 이름이 겹쳐 안 보임) */
+  function wide(ch) { return /[\u1100-\u11ff\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/.test(ch) ? 1 : 0.55; }
+  function wrapLabel(text, perLine, maxLines) {
+    var t = String(text == null ? '' : text).trim(), lines = [], cur = '', w = 0;
+    perLine = Math.max(1, perLine); maxLines = Math.max(1, maxLines || 2);
+    var words = t.split(/(\s+)/);
+    for (var i = 0; i < words.length; i++) {
+      var word = words[i], ww = 0;
+      for (var j = 0; j < word.length; j++) ww += wide(word.charAt(j));
+      if (/^\s+$/.test(word)) { if (cur) { cur += ' '; w += 0.55; } continue; }
+      if (cur && w + ww > perLine + 0.01) { lines.push(cur.trim()); cur = ''; w = 0; }
+      for (var k = 0; k < word.length; k++) {
+        var ch = word.charAt(k), cw = wide(ch);
+        if (w + cw > perLine + 0.01 && cur.trim()) { lines.push(cur.trim()); cur = ''; w = 0; }
+        cur += ch; w += cw;
+      }
+    }
+    if (cur.trim()) lines.push(cur.trim());
+    if (lines.length > maxLines) {
+      var last = lines[maxLines - 1], lw = 0;
+      for (var m = 0; m < last.length; m++) lw += wide(last.charAt(m));
+      while (last.length > 1 && lw + 1 > perLine + 0.01) { lw -= wide(last.charAt(last.length - 1)); last = last.slice(0, -1); }
+      lines = lines.slice(0, maxLines - 1).concat([last + '…']);
+    }
+    return lines.length ? lines : [''];
+  }
   function allValues(opts) {
     var all = [];
     opts.series.forEach(function (s) { s.values.forEach(function (v) { if (v != null && isFinite(v)) all.push(v); }); });
@@ -39,6 +65,14 @@
     if (opts.type === 'hbar') return hbar(opts);
     var W = 640, H = opts.height || 220, padL = 52, padR = 12, padT = 14, padB = 30;
     var n = opts.labels.length, unit = opts.unit || '';
+    // 눈금 이름: 칸 너비에 맞춰 두 줄까지 접고(긴 것은 …), 그만큼 아래 여백을 늘림. 칸이 너무 좁으면 예전처럼 건너뜀
+    var stepW = (W - padL - padR) / Math.max(n, 1), perLine = Math.floor((stepW - 4) / 12);
+    // 칸이 좁으면(막대가 많으면) 이름을 비스듬히 눕혀 한 줄로(8칸까지, 넘치면 …)
+    var tilt = perLine < 2 && opts.labels.length > 1 && stepW >= 10;
+    var wrapped = opts.labels.map(function (lb) { return perLine >= 2 ? wrapLabel(lb, perLine, 2) : tilt ? wrapLabel(lb, 8, 1) : [String(lb)]; });
+    var lineN = Math.max.apply(null, wrapped.map(function (x) { return x.length; }).concat([1]));
+    if (perLine >= 2 && lineN > 1) { padB += 14 * (lineN - 1); H += 14 * (lineN - 1); }
+    if (tilt) { padB += 62; H += 62; }
     var all = allValues(opts);
     var max = niceMax(Math.max.apply(null, all.concat([opts.minMax || 0]).concat((opts.refs || []).map(function (r) { return r.value * 1.1; }))));
     var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'chart', role: 'img', 'aria-label': opts.title || '' });
@@ -50,10 +84,14 @@
       svg.appendChild(el('text', { x: padL - 6, y: gy + 4, 'text-anchor': 'end', class: 'tick' }, fmt(gv, unit === '%' || unit === '%2' ? '%' : '')));
     }
     var step = plotW / Math.max(n, 1);
-    var every = Math.max(1, Math.ceil(n / 16)); // 칸이 많으면 눈금 글자를 건너뜀
+    var every = perLine >= 2 ? 1 : tilt ? Math.max(1, Math.ceil(13 / stepW)) : Math.max(1, Math.ceil(n / 16)); // 그래도 좁으면 눈금 글자를 건너뜀
     opts.labels.forEach(function (lb, i) {
       if (i % every) return;
-      svg.appendChild(el('text', { x: padL + step * (i + 0.5), y: H - 10, 'text-anchor': 'middle', class: 'tick' }, lb));
+      var x = padL + step * (i + 0.5), y0 = H - padB + 16;
+      var tx = el('text', tilt ? { x: x + 4, y: H - padB + 10, 'text-anchor': 'end', class: 'tick', transform: 'rotate(-55 ' + (x + 4) + ' ' + (H - padB + 10) + ')' } : { x: x, y: y0, 'text-anchor': 'middle', class: 'tick' });
+      wrapped[i].forEach(function (ln, j) { tx.appendChild(el('tspan', tilt ? {} : { x: x, dy: j ? 14 : 0 }, ln)); });
+      tx.appendChild(el('title', null, String(lb)));
+      svg.appendChild(tx);
     });
     if (!all.length) {
       svg.appendChild(el('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle', class: 'tick' }, '표시할 값이 없습니다'));
@@ -149,5 +187,5 @@
     f.appendChild(chart(opts));
     return f;
   }
-  root.STCharts = { chart: chart, figure: figure };
+  root.STCharts = { chart: chart, figure: figure, wrapLabel: wrapLabel };
 })(window);

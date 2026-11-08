@@ -2,6 +2,7 @@
 // 2차 반영: 수강생이 보낸 ERP 재고 엑셀 견본 · 창고 배정표의 「모양」(열 이름 · 줄 배치)을 그대로 본뜬 가상 표로 검사합니다.
 // 실제 값(자재번호 · 창고명 · 사람 이름)은 리포에 넣지 않습니다. 가상 샘플(248품목)은 js/sample-data.js.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const L = require('../js/logic.js');
@@ -556,6 +557,50 @@ test('진행률·정확도·증가/감소/순차이/절대 차이 — 전체와 
   near(wh['부품창고'].progress, 2 / 3); assert.equal(wh['제품창고'].diffItems, 1);
   const as = Object.fromEntries(an.dims.assignee.map(x => [x.key, x]));
   assert.equal(as['김'].items, 3); assert.equal(as['김'].counted, 2);
+});
+test('실사자별 — 배정은 배정표대로, 직접 센 품목 · 일치 · 차이는 기록의 작성자(By) 기준 (11-08 TEST: 다른 사람이 센 것이 배정받은 사람 쪽에 셈해짐)', () => {
+  // 김 배정(S-001 · S-002)을 「이」가 하나 센 경우 — 결과 파일 By = 이
+  const db = dbWith([rec('S-001', 90, '이', 't1', '입출고 누락'), rec('S-002', 50, '김', 't2')]);
+  const as = Object.fromEntries(L.analyze(db).dims.assignee.map(x => [x.key, x]));
+  assert.equal(as['김'].items, 3, '김 배정 3품목(S-001 · S-002 · S-003)');
+  assert.equal(as['김'].counted, 1, '김이 직접 센 것은 S-002 하나');
+  assert.equal(as['김'].done, 2); near(as['김'].progress, 2 / 3, 1e-9); assert.equal(as['김'].byOthers, 1);
+  assert.equal(as['이'].counted, 1, '이가 센 S-001 은 이에게');
+  assert.equal(as['이'].diffItems, 1); assert.equal(as['이'].forOthers, 1); assert.equal(as['이'].minusAmt, -10000);
+  assert.equal(as['김'].diffItems, 0);
+  // 배정이 없는 사람(목록에 없던 이름)도 한 줄로 나옴
+  const db2 = dbWith([rec('S-004', 10, '박', 't3')]);
+  const p2 = L.analyze(db2).dims.assignee.find(x => x.key === '박');
+  assert.ok(p2 && p2.counted === 1 && p2.items === 0 && p2.progress === null);
+});
+test('분석(BI) 그래프 — 창고는 이름(저장위치명)만, 이름이 같은 두 창고는 코드까지 · 처음 그릴 행 = 절대 차이 상위 n', () => {
+  const p = L.parseErp(REAL);
+  const db = L.restoreDb({ session: session(), items: p.items, assign: {}, records: [rec(p.items[0].no, 2, '김', 't1', '입출고 누락'), rec(p.items[4].no, 9, '김', 't2', '입출고 누락')] });
+  const wh = L.analyze(db).dims.wh;
+  assert.deepEqual(wh.map(x => x.label).sort(), ['가상창고1', '가상창고2', '가상창고3'], '코드 W10 등은 빼고 이름만');
+  assert.deepEqual(L.defaultPicks(wh, 2), ['W20 가상창고2', 'W10 가상창고1'], '절대 차이 300 > 200');
+  const same = L.summarize([{ wh: 'A1 창고', whName: '창고', sysAmt: 0 }, { wh: 'B1 창고', whName: '창고', sysAmt: 0 }], 'wh');
+  assert.deepEqual(same.map(x => x.label).sort(), ['A1 창고', 'B1 창고']);
+});
+test('그래프 눈금 이름 줄바꿈 — 칸 너비에 맞춰 두 줄까지, 넘치면 「…」 (js/charts.js wrapLabel)', () => {
+  const w = {}; new Function('window', fs.readFileSync(new URL('../js/charts.js', import.meta.url), 'utf8'))(w);
+  const wrap = w.STCharts.wrapLabel;
+  assert.equal(typeof wrap, 'function');
+  assert.deepEqual(wrap('원재료라인창고', 5, 2), ['원재료라인', '창고']);
+  assert.deepEqual(wrap('반제품 창고 외주 임가공 보관', 5, 2), ['반제품', '창고 외…']);
+  assert.deepEqual(wrap('소재창고', 5, 2), ['소재창고']);
+  wrap('아주 긴 창고 이름이 여기 있습니다', 4, 2).forEach(l => assert.ok(l.length <= 5, l));
+});
+test('차이대사 사진 — 볼 수 있는 사진(data:image)을 넘김, 채택 기록에 없으면 같은 품목 이전 기록 사진, 결과 파일에서 빠진 사진은 따로 표시 (11-08 TEST)', () => {
+  const img = 'data:image/jpeg;base64,AAAA';
+  const r1 = Object.assign(rec('S-001', 90, '김', '2026-10-31T19:00', '입출고 누락'), { photo: img });
+  const r2 = rec('S-001', 91, '김', '2026-10-31T19:10', '입출고 누락');               // 같은 사람이 다시 셈(사진 없음)
+  const r3 = Object.assign(rec('S-002', 40, '김', '2026-10-31T19:20', '위치 이동·분산'), { photo: 'omitted' });
+  const rows = Object.fromEntries(L.varianceRows(dbWith([r1, r2, r3])).map(r => [r.no, r]));
+  assert.equal(rows['S-001'].photoSrc, img); assert.equal(rows['S-001'].photoOld, true);
+  assert.equal(rows['S-002'].photoSrc, ''); assert.equal(rows['S-002'].photoOmitted, true);
+  const one = Object.fromEntries(L.varianceRows(dbWith([r1])).map(r => [r.no, r]));
+  assert.equal(one['S-001'].photoSrc, img); assert.equal(one['S-001'].photoOld, false);
 });
 test('사유별 — 차이 품목만, 비중 합 100%, 사유 없는 차이는 「사유 미입력」', () => {
   const db = dbWith([rec('S-001', 90, '김', 't1', '입출고 누락'), rec('S-002', 40, '김', 't2', ''), rec('S-004', 10, '이', 't3', '')]);

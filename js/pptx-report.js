@@ -143,8 +143,26 @@
     var ot = openTag(out);
     return setAttr(ot, 'h', String(Math.round(h || +getAttr(ot, 'h') || 300000))) + out.slice(ot.length);
   }
+  /* PowerPoint 로 저장한 표는 줄마다 <a16:rowId val="…"/> 이 붙어 있습니다. 같은 줄을 본떠 여러 줄을 만들면 이 값이 겹치고,
+     PowerPoint 가 「복구」하면서 그 슬라이드 내용을 통째로 비웁니다(11-08 수강생 TEST: 직전 보고서로 만들면 첫 차이 장만 보이고
+     나머지는 빈 장). 표를 다시 짤 때 줄마다 새 번호를 줍니다. 도구의 기본 양식에는 이 값이 없어 그쪽은 멀쩡했습니다. */
+  function renumberRows(rowXmls) {
+    var n = 0;
+    return rowXmls.map(function (r) { return r.replace(/(<a16:rowId\b[^>]*\sval=")\d+(")/g, function (m, a, b) { n++; return a + (1000000000 + n * 10) + b; }); });
+  }
+  /* 본떠 만든 슬라이드마다 개체 고유값을 새로 — 슬라이드 <p14:creationId val> 와 개체 <a16:creationId id="{GUID}"> 가
+     여러 장에서 같으면 PowerPoint 가 뒤의 장을 고장으로 봅니다. k = 새 슬라이드 순번(0, 1, 2 …) */
+  function freshIds(xml, k) {
+    xml = xml.replace(/(<p14:creationId\b[^>]*\sval=")(\d+)(")/g, function (m, a, v, b) { return a + ((+v + (k + 1) * 2654435761) % 4294967296 >>> 0) + b; });
+    return xml.replace(/(<a16:creationId\b[^>]*\sid="\{[0-9A-Fa-f-]{24})([0-9A-Fa-f]{12})(\}")/g, function (m, a, tail, b) {
+      var hi = parseInt(tail.slice(0, 4), 16), lo = parseInt(tail.slice(4), 16);
+      lo = ((lo ^ Math.imul(k + 1, 0x9E3779B1)) >>> 0); hi = (hi ^ ((k + 1) & 0xffff)) & 0xffff;
+      return a + ('0000' + hi.toString(16)).slice(-4).toUpperCase() + ('00000000' + lo.toString(16)).slice(-8).toUpperCase() + b;
+    });
+  }
   function rebuildTable(gf, T, rowXmls) {
     var first0 = T.rows[0].s, lastE = T.rows[T.rows.length - 1].e;
+    rowXmls = renumberRows(rowXmls);
     var tbl = T.tbl.slice(0, first0) + rowXmls.join('') + T.tbl.slice(lastE);
     gf = gf.slice(0, T.s) + tbl + gf.slice(T.e);
     var cy = rowXmls.reduce(function (s, r) { return s + (+getAttr(openTag(r), 'h') || 0); }, 0);
@@ -657,8 +675,8 @@
         });
         if (!groups.length) log.warnings.push('차이가 있는 품목이 없어 2장 슬라이드를 넣지 않았습니다.');
         log.groups = groups.length; log.diffPages = pages.length; log.cap = C.cap;
-        var newXml = pages.map(function (pg) {
-          var x = txml;
+        var newXml = pages.map(function (pg, k) {
+          var x = freshIds(txml, k);
           var tt = tablesOf(x).filter(function (t) { return tableKind(t.T) === 'diff'; })[0];
           x = replaceAt(x, tt.s, tt.e - tt.s, diffTable(tt.gf, tt.T, pg.g, pg.rows, pg.p === pg.n, C, U));
           var sh = shapesOf(x).filter(function (s) { return /^차이내용/.test(s.n); })[0];

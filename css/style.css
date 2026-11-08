@@ -379,3 +379,14 @@ svg.chart.hbar .tick { font-size: 15px; }
   .print-sheet .sign { margin-top: 14pt; }
 }
 .view-toggle { flex-wrap: wrap; max-width: 100%; }
+
+/* 11-08 — 차이대사 사진 보기 · 분석(BI) 그래프 행 고르기 */
+.photo-btn { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; vertical-align: middle; }
+.photo-thumb { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; display: block; }
+.photo-dialog { width: min(860px, calc(100vw - 32px)); }
+.photo-full { display: block; max-width: 100%; max-height: calc(100vh - 220px); margin: 8px auto 0; border-radius: 8px; }
+.bi-pick { align-items: center; margin: 0 0 8px; }
+table.list.bi td:first-child, table.list.bi th:first-child { width: 1%; text-align: center; }
+svg.chart text.tick tspan { font: inherit; }
+.team-steps { margin-top: 12px; text-align: left; }
+.team-steps summary { cursor: pointer; font-weight: 700; }
