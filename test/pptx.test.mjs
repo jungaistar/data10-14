@@ -78,6 +78,16 @@ async function checkPkg(buf) {
   ids.forEach(x => { assert.ok(+x[1] >= 256 && +x[1] < 2147483648, 'id 범위 ' + x[1]); assert.ok(new RegExp('Id="' + x[2] + '"[^>]*/slide"').test(prels) || new RegExp('Id="' + x[2] + '"').test(prels), 'rels 에 없는 ' + x[2]); });
   const slideParts = names.filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
   assert.equal(slideParts.length, ids.length, '슬라이드 파트 수 = 목록 수(남은 파트 없음)');
+  // 11-10: 한 슬라이드만 가질 수 있는 파트(태그 · 차트 · 메모 슬라이드 · 댓글)를 두 장 이상이 가리키면 PowerPoint 가 두 번째 장부터 비움
+  const ownedBy = {};
+  names.filter(n => /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(n)).forEach(n => {
+    const owner = n.replace(/_rels\//, '').replace(/\.rels$/, '');
+    for (const m of text[n].matchAll(/<Relationship\s[^>]*>/g)) {
+      if (!/\/(tags|chart|notesSlide|comments|package)"/.test(m[0])) continue;
+      const p = resolve(owner, /Target="([^"]+)"/.exec(m[0])[1]);
+      assert.ok(!ownedBy[p], '한 장만 가질 파트를 여러 장이 함께 씀 ' + p + ' (' + ownedBy[p] + ', ' + owner + ')'); ownedBy[p] = owner;
+    }
+  });
   const notesOwner = {};
   names.filter(n => /^ppt\/slides\/_rels\//.test(n)).forEach(n => { for (const m of text[n].matchAll(/Target="\.\.\/notesSlides\/([^"]+)"/g)) { assert.ok(!notesOwner[m[1]], '메모 슬라이드 공유 ' + m[1]); notesOwner[m[1]] = n; } });
   // 11-08: PowerPoint 가 「복구」하며 슬라이드를 비우는 고유값 겹침 — 표 안 줄 번호(a16:rowId), 슬라이드 번호(p14:creationId), 개체 번호(a16:creationId)
@@ -305,6 +315,45 @@ await test('PowerPoint 로 저장한 직전 보고서(줄 번호 a16:rowId · �
   const diffs = d.filter(s => s.tables.some(t => t.kind === 'diff'));
   assert.equal(diffs.length, r.log.diffPages, '차이 장마다 표가 남아 있음');
   assert.ok(diffs.every(s => s.tables.find(t => t.kind === 'diff').rows.length >= 2), '차이 장마다 머리 + 줄');
+});
+
+await test('think-cell 태그가 붙은 직전 보고서(11-10 요청자 양식 모양) — 상세 표 N장 모두 행이 있고, 장마다 태그 파트를 따로 가짐(첫 장만 보이던 결함)', async () => {
+  // 가상 양식의 차이 슬라이드 도형마다 태그(ppt/tags/tagN.xml)를 붙여 PowerPoint · think-cell 로 저장한 모양을 만듦
+  const z = await JSZip.loadAsync(TPL);
+  const RT = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/';
+  let ct = await z.file('[Content_Types].xml').async('string'), tn = 0;
+  for (const k of [2, 3]) {
+    const sp = 'ppt/slides/slide' + k + '.xml', rp = 'ppt/slides/_rels/slide' + k + '.xml.rels';
+    let x = await z.file(sp).async('string'), rels = await z.file(rp).async('string'), r = 0;
+    x = x.replace(/<p:nvPr\/>/g, () => {
+      tn++; r++;
+      z.file('ppt/tags/tag' + tn + '.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p:tagLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:tag name="SAMPLESHAPEID" val="s' + tn + '"/></p:tagLst>');
+      ct = ct.replace('</Types>', '<Override PartName="/ppt/tags/tag' + tn + '.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.tags+xml"/></Types>');
+      rels = rels.replace('</Relationships>', '<Relationship Id="rIdT' + r + '" Type="' + RT + 'tags" Target="../tags/tag' + tn + '.xml"/></Relationships>');
+      return '<p:nvPr><p:custDataLst><p:tags r:id="rIdT' + r + '"/></p:custDataLst></p:nvPr>';
+    });
+    z.file(sp, x); z.file(rp, rels);
+  }
+  z.file('[Content_Types].xml', ct);
+  const tagged = await z.generateAsync({ type: 'nodebuffer' });
+  await checkPkg(tagged); // 넣은 양식 자체는 정상(차이 슬라이드 두 장이 서로 다른 태그)
+  assert.ok(tn >= 6, '태그를 붙인 도형 ' + tn);
+  const r = await make(tagged);
+  assert.ok(r.log.diffPages >= 3, '상세 표가 여러 장이어야 검사가 뜻이 있음 ' + r.log.diffPages);
+  const k = await checkPkg(r.out); // 태그 파트를 두 장이 함께 쓰면 여기서 실패
+  const d = await dump(r.out);
+  const diffs = d.filter(s => s.tables.some(t => t.kind === 'diff'));
+  assert.equal(diffs.length, r.log.diffPages, '상세 표 장 수');
+  const pages = []; P.diffGroups(P.reportData(an, db), 'wh').forEach(g => { for (let i = 0; i < g.rows.length; i += r.log.cap) pages.push(g.rows.slice(i, i + r.log.cap).length); });
+  diffs.forEach((s, i) => {
+    const t = s.tables.find(t => t.kind === 'diff');
+    const body = t.rows.slice(1).filter(row => row[0] !== '합계');
+    assert.equal(body.length, pages[i], (i + 1) + '번째 상세 표 행 수');
+    assert.ok(body.every(row => row[0] && row[3] !== ''), (i + 1) + '번째 상세 표에 빈 행 없음');
+  });
+  // 장마다 자기 태그 — 지운 차이 슬라이드의 태그는 남지 않음
+  const tagParts = k.names.filter(n => /^ppt\/tags\/tag\d+\.xml$/.test(n));
+  assert.equal(tagParts.length, diffs.length * (await JSZip.loadAsync(tagged).then(async z0 => ((await z0.file('ppt/slides/_rels/slide2.xml.rels').async('string')).match(/\/tags"/g) || []).length)), '태그 파트 = 상세 표 장 수 × 장마다 태그 수');
 });
 
 console.log('만들기 — 기본 양식');

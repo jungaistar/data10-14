@@ -27,7 +27,7 @@ window.AUTH_CONFIG = {
       },
       {
         "name": "보고서 PPT · 결과서",
-        "desc": "직전 보고서 pptx 에 내용만 바꿔 넣고, 버전·기록 ID 가 있는 결과서 엑셀·Word 를 냅니다."
+        "desc": "직전 보고서 pptx 에 내용만 바꿔 넣고(상세 표가 여러 장이어도 장마다 표가 채워짐), 버전·기록 ID 가 있는 결과서 엑셀·Word 를 냅니다."
       }
     ],
     "steps": [
@@ -37,6 +37,17 @@ window.AUTH_CONFIG = {
       "현장 입력",
       "취합 · 충돌",
       "차이대사 · 분석"
-    ]
+    ],
+    "landing": {
+      "image": "images/landing.jpg",
+      "imageMode": "cover",
+      "colors": {
+        "navy": "#005EB8",
+        "navy2": "#003b75",
+        "brand": "#005EB8",
+        "brandDark": "#004a91",
+        "accent": "#a9d0f5"
+      }
+    }
   }
 };

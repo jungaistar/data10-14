@@ -1,0 +1,34 @@
+/* 대표색 덮어쓰기 층(2026-11-10 요청: 「대표컬러는 #005EB8, 전체 컬러감은 브랜드 사이트를 참고」)
+   파랑 한 색 중심 · 흰 바탕 · 절제된 회색. 원본 style.css 는 그대로 두고 그 바로 다음에 읽는다
+   (되돌리려면 index.html 의 이 줄만 빼면 된다). 면과 그 위 글자는 다른 토큰 — 파랑 면 위 글자는 --on-primary(흰색).
+   대비(WCAG): #005EB8 흰 바탕 6.4:1 · 본문 바탕 5.9:1 · #003E7E 10.6:1 · 왼쪽 메뉴 #062B57 위 흰 글자 14.1:1 · 보조 글자 7.8:1 · 고른 메뉴 위 보조 글자 5.4:1 */
+:root {
+  --bg: #f4f7fb;               /* 본문 바탕 — 옅은 하늘빛 회색 */
+  --surface: #ffffff;
+  --text: #1a2330;
+  --muted: #55606e;
+  --line: #d5dde7;
+  --primary: #005EB8;          /* 대표색 — 단추 · 링크 · 선택 */
+  --primary-dark: #003E7E;     /* 눌림 · 강조 글자 */
+  --primary-soft: #e6f0fa;     /* 옅은 하늘색 — 선택 칩 · 안내 바탕 */
+  --on-primary: #ffffff;
+  --side: #062B57;             /* 왼쪽 메뉴 바탕 — 대표색 계열의 짙은 남색 */
+  --side-2: #0B4384;           /* 고른 메뉴 */
+  --on-side: #f2f6fb;
+  --on-side-muted: #a9c3e3;
+  --series-1: #005EB8;         /* 그래프 주 계열 = 대표색 */
+  --series-2: #e0712c;         /* 감소 · 기준 미달(파랑과 구분되는 주황) */
+  --series-3: #2f9e6f;         /* 정확도 · 목표선 */
+  --series-plan: #9aa6b5;      /* 중립 회색 */
+}
+/* style.css 에 직접 적힌 옛 파랑을 대표색 계열로 */
+.nav a[aria-current="page"] { background: var(--side-2); box-shadow: inset 3px 0 0 #6fb1f0; }
+.nav a[aria-current="page"] .no { color: #9ccbf5; }
+.scope-chip { border-color: #b5d0ee; color: var(--primary-dark); }
+.tag.m4 { color: var(--primary-dark); }
+.alert.info { background: var(--primary-soft); color: #0a3566; }
+table.list th { background: #eaf1f8; }
+table.list tr.sum td { background: #eaf1f8; }
+table.list tr.total td { background: #d9e6f4; }
+.heat-1 { background: #eaf3fc; } .heat-2 { background: #d2e5f8; } .heat-3 { background: #b3d2f1; }
+.view-toggle button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }

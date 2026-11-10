@@ -692,13 +692,78 @@
       }
     });
   }
+  /* 슬라이드 한 장만 가질 수 있는 파트 — 여러 슬라이드가 같은 파트를 가리키면 PowerPoint 가 「복구」하며 두 번째 장부터 내용을 비웁니다.
+     2026-11-10 요청자 실제 양식: 차이 슬라이드의 도형마다 think-cell 태그(ppt/tags/tagN.xml)가 붙어 있었고, 본뜬 장이 모두 같은 태그 파트를 가리켜
+     첫 장만 보이고 나머지는 빈 장(표지 배경)이 되었습니다. 그림(image) · 레이아웃 · OLE 개체는 PowerPoint 도 여러 장이 함께 쓰므로 그대로 둡니다. */
+  var OWNED_RE = /\/(tags|chart|chartUserShapes|chartStyle|chartColorStyle|diagramData|diagramLayout|diagramQuickStyle|diagramColors|diagramDrawing|package|ctrlProp|comments)$/;
+  function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  /* part 를 같은 폴더에 새 이름으로 복사(그 파트의 rels 도, rels 안의 「한 장만」 파트도 다시 복사). 새 경로를 돌려줌 */
+  function clonePart(zip, st, part, depth) {
+    var f = zip.file(part);
+    if (!f) return Promise.resolve(part);
+    var dir = part.slice(0, part.lastIndexOf('/') + 1), base = part.slice(dir.length);
+    var m = /^(.*?)(\d*)(\.[^.]+)$/.exec(base) || [base, base, '', ''];
+    var stem = m[1], ext = m[3];
+    var re = new RegExp('^' + escRe(dir + stem) + '(\\d+)' + escRe(ext) + '$');
+    var n = Math.max(st.next[dir + stem] || 0, maxNum(Object.keys(zip.files), re)) + 1;
+    st.next[dir + stem] = n;
+    var np = dir + stem + n + ext;
+    var ov = new RegExp('<Override PartName="/' + escRe(part) + '" ContentType="([^"]*)"\\s*/>').exec(st.ct);
+    if (ov) st.ct = st.ct.replace('</Types>', '<Override PartName="/' + np + '" ContentType="' + ov[1] + '"/></Types>');
+    return f.async('uint8array').then(function (bytes) {
+      zip.file(np, bytes);
+      var rf = zip.file(relsPath(part));
+      if (!rf) return np;
+      return rf.async('string').then(function (rx) {
+        return cloneOwned(zip, st, part, rx, depth + 1).then(function (nrx) { zip.file(relsPath(np), nrx); return np; });
+      });
+    });
+  }
+  /* rels 안의 「한 장만」 대상을 복사본으로 바꾼 rels XML */
+  function cloneOwned(zip, st, owner, relsXml, depth) {
+    var list = relsOf(relsXml).filter(function (r) { return r.mode !== 'External' && OWNED_RE.test(r.type); });
+    if (depth > 3 || !list.length) return Promise.resolve(relsXml);
+    return list.reduce(function (p, r) {
+      return p.then(function (x) {
+        return clonePart(zip, st, resolvePath(owner, r.target), depth).then(function (np) {
+          var nr = r.xml.replace(/(\sTarget=")[^"]*(")/, '$1' + r.target.replace(/[^/]+$/, np.split('/').pop()) + '$2');
+          return x.replace(r.xml, nr);
+        });
+      });
+    }, Promise.resolve(relsXml));
+  }
   /* 슬라이드 갈아 끼우기 — [Content_Types].xml · presentation.xml(sldIdLst · 구역) · presentation.xml.rels · 슬라이드 rels · 메모 슬라이드 */
   function replaceDiffSlides(zip, pkg, removeIdx, tplSlide, newXmls) {
-    var pres = pkg.pres, prels = pkg.presRels, ct = pkg.ct;
     var removed = removeIdx.map(function (i) { return pkg.slides[i]; });
-    var anchorId = removed[0].id;
     var tplRels = relsOf(tplSlide.rels).filter(function (r) { return !/\/notesSlide$/.test(r.type); });
     var relsXml = XML_HEAD + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + tplRels.map(function (r) { return r.xml; }).join('') + '</Relationships>';
+    // 지우는 차이 슬라이드만 가리키던 「한 장만」 파트(태그 등) — 본뜬 슬라이드는 모두 새 복사본을 쓰므로 지움
+    var keep = {};
+    pkg.slides.forEach(function (s) { if (removed.indexOf(s) < 0) relsOf(s.rels).forEach(function (r) { if (r.mode !== 'External') keep[resolvePath(s.path, r.target)] = 1; }); });
+    var st = { ct: pkg.ct, next: {} }, orphan = [];
+    removed.forEach(function (s) {
+      relsOf(s.rels).forEach(function (r) {
+        if (r.mode === 'External' || !OWNED_RE.test(r.type)) return;
+        var p = resolvePath(s.path, r.target);
+        if (!keep[p] && orphan.indexOf(p) < 0) orphan.push(p);
+      });
+    });
+    // 새 슬라이드마다 자기 복사본(첫 장도 — 원래 파트는 아래에서 지움)
+    var tplPath = tplSlide.path;
+    var relsList = [];
+    return newXmls.reduce(function (p) {
+      return p.then(function () { return cloneOwned(zip, st, tplPath, relsXml, 0).then(function (x) { relsList.push(x); }); });
+    }, Promise.resolve()).then(function () {
+      orphan.forEach(function (p) {
+        zip.remove(p); zip.remove(relsPath(p));
+        st.ct = st.ct.replace(new RegExp('<Override PartName="/' + escRe(p) + '"[^>]*/>'), '');
+      });
+      return swapSlides(zip, pkg, removed, st.ct, newXmls, relsList);
+    });
+  }
+  function swapSlides(zip, pkg, removed, ct, newXmls, relsList) {
+    var pres = pkg.pres, prels = pkg.presRels;
+    var anchorId = removed[0].id;
     // 새 이름 · 번호
     var names = Object.keys(zip.files);
     var nextPart = maxNum(names, /^ppt\/slides\/slide(\d+)\.xml$/) + 1;
@@ -720,9 +785,9 @@
     });
     void jobs;
     // 넣기
-    added.forEach(function (a) {
+    added.forEach(function (a, k) {
       zip.file(a.path, a.xml);
-      zip.file(relsPath(a.path), relsXml);
+      zip.file(relsPath(a.path), relsList[k]);
       ct = ct.replace('</Types>', '<Override PartName="/' + a.path + '" ContentType="' + CT_SLIDE + '"/></Types>');
       prels = prels.replace('</Relationships>', '<Relationship Id="' + a.rid + '" Type="' + REL + 'slide" Target="slides/' + a.path.split('/').pop() + '"/></Relationships>');
     });
