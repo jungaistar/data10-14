@@ -200,7 +200,9 @@ window.AUTH_CONFIG = {
       },
       "company": {
         "name": "두산",
-        "en": "DOOSAN"
+        "en": "DOOSAN",
+        "logo": "images/logo.svg",
+        "logoH": 24
       }
     }
   }
