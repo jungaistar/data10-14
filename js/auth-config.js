@@ -8,6 +8,7 @@ window.AUTH_CONFIG = {
   "kakao": true,
   "idleMinutes": 30,
   "localBypass": true,
+  "board": true,
   "site": {
     "title": "재고실사 Start-End",
     "summary": "ERP 재고 엑셀과 창고 배정표로 기준 일자·시각이 박힌 재고실사 기록서를 만들고, 휴대폰이나 SharePoint 엑셀로 적은 실물수량·사유를 합쳐 차이대사·분석과 버전이 있는 결과 보고서(PPT·엑셀)까지 잇는 브라우저 도구입니다.",
@@ -203,7 +204,8 @@ window.AUTH_CONFIG = {
         "en": "DOOSAN",
         "logo": "images/logo.svg",
         "logoH": 24
-      }
+      },
+      "heroMode": "design"
     }
   }
 };
