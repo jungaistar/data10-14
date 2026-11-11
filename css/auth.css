@@ -510,7 +510,7 @@ html.auth-lock body { overflow: hidden; }
 .hp-slide { background: var(--ag-navy-2); }
 .hp-slide::after { display: none; }
 .hp-sl-track { position: absolute; inset: 0; display: flex; transition: transform .9s cubic-bezier(.22, .7, .2, 1); will-change: transform; }
-.hp-sl { flex: 0 0 100%; background: center / cover no-repeat; }
+.hp-sl { flex: 0 0 100%; background: 78% center / cover no-repeat; }   /* 왼쪽에 제목이 놓이므로 사진의 오른쪽(주제)을 살린다 */
 .hp-slide::before { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
   background: linear-gradient(95deg, color-mix(in srgb, var(--ag-navy-2) 92%, transparent) 0%, color-mix(in srgb, var(--ag-navy-2) 74%, transparent) 42%, color-mix(in srgb, var(--ag-navy-2) 22%, transparent) 78%, transparent 100%),
               linear-gradient(0deg, rgba(0, 0, 0, .34) 0%, transparent 34%); }

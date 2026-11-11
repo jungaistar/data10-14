@@ -202,7 +202,7 @@
   var HERO_KEY = 'kit.' + P + '.hero', slTimer = null;
   function slides() { return (LD.slides || []).filter(function (x) { return x && x.image; }).slice(0, 5); }
   function siteCache() { try { return JSON.parse(localStorage.getItem(HERO_KEY) || 'null') || {}; } catch (e) { return {}; } }
-  function heroMode() { var m = siteCache().hero_mode || LD.heroMode || 'design'; return m === 'slide' && slides().length ? 'slide' : 'design'; }
+  function heroMode() { var m = siteCache().hero_mode; if (!m || m === 'auto') m = LD.heroMode || 'design'; return m === 'slide' && slides().length ? 'slide' : 'design'; }
   function slideOn() { return heroMode() === 'slide'; }
   function slideSeconds() { var n = +siteCache().slide_seconds || +LD.slideSeconds || 5; return Math.max(3, Math.min(20, n)); }
   function slideHero(eyebrow, head, lead, cta, trust, title) {
@@ -735,7 +735,7 @@
   function pageSite(pg) {
     var TS = P + '_site_settings', sl = slides();
     var draw = function (row, missing) {
-      var mode = (row && row.hero_mode) || LD.heroMode || 'design', sec = (row && row.slide_seconds) || slideSeconds();
+      var mode = (row && row.hero_mode !== 'auto' && row.hero_mode) || LD.heroMode || 'design', sec = (row && row.slide_seconds) || slideSeconds();
       var opt = function (v, t, d, off) {
         return '<label class="ks-opt' + (off ? ' is-off' : '') + '"><input type="radio" name="hero_mode" value="' + v + '"' + (mode === v ? ' checked' : '') + (off ? ' disabled' : '') + '>' +
           '<span><b>' + t + '</b><small>' + d + '</small></span></label>';

@@ -5,7 +5,8 @@
 -- ▣ 만드는 개체는 전부 data1014_site_ 로 시작합니다(표 1 · 함수 1 · 정책 2). 트리거 없음.
 -- ▣ 재실행 안전: IF NOT EXISTS · CREATE OR REPLACE · DROP POLICY IF EXISTS
 -- ▣ 설정은 표 data1014_site_settings 한 줄입니다. 도구의 「첫 화면」(관리자)이나 Table Editor 에서 고칩니다.
---     hero_mode      design(회사 색 바탕 디자인 + 움직임) · slide(사진이 옆으로 넘어가는 슬라이드)
+--     hero_mode      auto(설정 파일 js/auth-config.js 의 landing.heroMode 를 따름 — 처음 값)
+--                    design(회사 색 바탕 디자인 + 움직임) · slide(사진이 옆으로 넘어가는 슬라이드)
 --     slide_seconds  사진이 넘어가는 간격(초, 3~20)
 -- ▣ 로그인 전 화면이 읽어야 하므로 함수 data1014_site_public() 하나만 비로그인(anon)에게 엽니다.
 --   이 함수는 위 두 값만 돌려줍니다. 표 자체는 비로그인이 읽을 수 없습니다.
@@ -20,7 +21,7 @@ end $$;
 
 create table if not exists public.data1014_site_settings (
   id            int primary key default 1,
-  hero_mode     text not null default 'design' check (hero_mode in ('design', 'slide')),
+  hero_mode     text not null default 'auto' check (hero_mode in ('auto', 'design', 'slide')),
   slide_seconds int not null default 5 check (slide_seconds between 3 and 20),
   updated_at    timestamptz not null default now(),
   constraint data1014_site_settings_one check (id = 1)

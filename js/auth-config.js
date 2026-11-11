@@ -205,7 +205,18 @@ window.AUTH_CONFIG = {
         "logo": "images/logo.svg",
         "logoH": 24
       },
-      "heroMode": "design"
+      "heroMode": "design",
+      "slides": [
+        {
+          "image": "images/slide-1.jpg"
+        },
+        {
+          "image": "images/slide-2.jpg"
+        },
+        {
+          "image": "images/slide-3.jpg"
+        }
+      ]
     }
   }
 };

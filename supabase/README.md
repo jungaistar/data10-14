@@ -238,7 +238,8 @@ update public.data1014_board_settings
 
 | 값 | 모양 |
 |---|---|
-| `design` | 회사 색 바탕에 실제 화면 카드와 떠 있는 기능 표시, 들어올 때 떠오르는 움직임. 사진이 없어도 됩니다. (처음 값) |
+| `auto` | 설정 파일(`js/auth-config.js` 의 `landing.heroMode`)에 적힌 모양을 따릅니다. (처음 값) |
+| `design` | 회사 색 바탕에 실제 화면 카드와 떠 있는 기능 표시, 들어올 때 떠오르는 움직임. 사진이 없어도 됩니다. |
 | `slide` | 사진 3장이 옆으로 넘어가는 슬라이드. 제목 · 설명 · 「로그인」 단추가 사진 위에 놓입니다. 아래 점과 화살표로 넘기고, 휴대폰에서는 손가락으로 넘깁니다. |
 
 ### 켜는 순서
@@ -250,7 +251,7 @@ update public.data1014_board_settings
 
 ### Supabase 에서 바꾸기
 
-「Table Editor」 → `data1014_site_settings` 표의 한 줄(`id` = 1)에서 `hero_mode` 를 `design` 또는 `slide` 로, `slide_seconds` 를 3~20 으로 고칩니다.
+「Table Editor」 → `data1014_site_settings` 표의 한 줄(`id` = 1)에서 `hero_mode` 를 `design` · `slide` · `auto` 가운데 하나로, `slide_seconds` 를 3~20 으로 고칩니다.
 
 ```sql
 update public.data1014_site_settings set hero_mode = 'slide', slide_seconds = 6 where id = 1;
