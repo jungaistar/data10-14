@@ -18,7 +18,7 @@
   'use strict';
   /* 판(版) — index.html 의 ?v= · app.js 의 APP_VERSION 과 같아야 합니다(scripts/bump-version.mjs 로 함께 올림).
      브라우저가 옛 logic.js 와 새 app.js 를 섞어 쓰면 app.js 가 이 값을 보고 계산을 멈춥니다. */
-  var VERSION = '2026-11-11.4';
+  var VERSION = '2026-11-11.6';
 
   var SCHEMA_VERSION = 1;
   var RESULT_KIND = 'data10-14.result';
